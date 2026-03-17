@@ -21,7 +21,7 @@
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
 
-const HOUR_H=38;
+const HOUR_H=28;
 const HALF_H=12;
 const COL_H=HOUR_H*HALF_H;
 const STEP=30; // minutes per nudge
@@ -238,6 +238,8 @@ function App(){
   function nudgeEnd(delta){
     if(!selectedBlock)return;
     const type=isMood?"mood":"activity";
+    const curDur=durMins(selectedBlock);
+    // − shrinks by 30min (0.5h), + grows by 30min
     const newEnd=clamp(toMins(selectedBlock.eh,selectedBlock.em)+delta,toMins(selectedBlock.sh,selectedBlock.sm)+STEP,23*60+59);
     const{h,m}=fromMins(newEnd);
     updBlock(type,selectedBlock.id,{eh:h,em:m});
@@ -351,7 +353,8 @@ function App(){
     const colBlocks=curBlocks.filter(b=>blockInCol(b,col)!==null);
     return(
       <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
-        <div ref={ref} style={{flex:1,overflowY:"auto",position:"relative",borderRadius:10,background:"#fff",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",touchAction:"pan-y",WebkitOverflowScrolling:"touch"}}>
+        <div ref={ref} style={{flex:1,overflow:"hidden",position:"relative",borderRadius:10,background:"#fff",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+          {/* inner scrollable for touch-scrolling left/right via parent, but columns don't scroll vertically */}
           {/* Hour lines */}
           {Array.from({length:HALF_H+1},(_,i)=>{
             const absH=col*12+i;
@@ -431,8 +434,8 @@ function App(){
               <span style={{fontSize:13,fontWeight:600,color:"#3a3a3c"}}>{dateLabel}</span>
               <button onClick={()=>chDate(1)} style={NB}>›</button>
             </div>
-            {/* Chips — horizontal scroll, swipe left to delete */}
-            <div style={{display:"flex",overflowX:"auto",gap:6,alignItems:"center",marginBottom:8,paddingBottom:2,WebkitOverflowScrolling:"touch",scrollbarWidth:"none"}}
+            {/* Chips — horizontal scroll row with extra bottom padding for swipe space */}
+            <div style={{display:"flex",overflowX:"auto",gap:6,alignItems:"center",marginBottom:10,paddingBottom:6,WebkitOverflowScrolling:"touch",scrollbarWidth:"none"}}
               onClick={e=>e.stopPropagation()}>
               {chips.map(item=>(
                 <SwipeChip key={item.id} item={item} tab={tab}
@@ -445,7 +448,7 @@ function App(){
             </div>
           </div>
 
-          {/* SPLIT TIMELINE */}
+          {/* SPLIT TIMELINE — fixed height, no scroll */}
           <div style={{flex:1,overflow:"hidden",display:"flex",gap:6,padding:"0 12px",minHeight:0}}>
             <TimelineCol col={0}/>
             <TimelineCol col={1}/>
