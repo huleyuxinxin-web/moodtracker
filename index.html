@@ -133,17 +133,17 @@ function SwipeChip({item,tab,onDragStart,onEdit,onDelete}){
         onTouchEnd={onTE}
         onDoubleClick={onEdit}
         style={{
-          display:"flex",alignItems:"center",gap:5,padding:"6px 12px",
+          display:"flex",alignItems:"center",gap:6,padding:"9px 18px",
           borderRadius:20,background:"#fff",
           border:`1.5px solid ${rgba(item.color,0.45)}`,
-          cursor:"grab",fontSize:12,fontWeight:600,color:"#1c1c1e",
+          cursor:"grab",fontSize:14,fontWeight:600,color:"#1c1c1e",
           touchAction:"pan-y",
           boxShadow:`0 1px 3px ${rgba(item.color,0.12)}`,
           transform:`translateX(${swipeX}px)`,
           transition:swiping?"none":"transform .2s",
           position:"relative",zIndex:1
         }}>
-        <span style={{width:8,height:8,borderRadius:2,background:item.color,display:"inline-block"}}/>
+        <span style={{width:10,height:10,borderRadius:2,background:item.color,display:"inline-block"}}/>
         {item.name}
       </div>
     </div>
@@ -238,9 +238,8 @@ function App(){
   function nudgeEnd(delta){
     if(!selectedBlock)return;
     const type=isMood?"mood":"activity";
-    const curDur=durMins(selectedBlock);
-    // − shrinks by 30min (0.5h), + grows by 30min
-    const newEnd=clamp(toMins(selectedBlock.eh,selectedBlock.em)+delta,toMins(selectedBlock.sh,selectedBlock.sm)+STEP,23*60+59);
+    const minEnd=toMins(selectedBlock.sh,selectedBlock.sm)+STEP;
+    const newEnd=clamp(toMins(selectedBlock.eh,selectedBlock.em)+delta,minEnd,23*60+30);
     const{h,m}=fromMins(newEnd);
     updBlock(type,selectedBlock.id,{eh:h,em:m});
   }
@@ -435,7 +434,7 @@ function App(){
               <button onClick={()=>chDate(1)} style={NB}>›</button>
             </div>
             {/* Chips — horizontal scroll row with extra bottom padding for swipe space */}
-            <div style={{display:"flex",overflowX:"auto",gap:6,alignItems:"center",marginBottom:10,paddingBottom:6,WebkitOverflowScrolling:"touch",scrollbarWidth:"none"}}
+            <div style={{display:"flex",overflowX:"auto",gap:10,alignItems:"center",marginBottom:12,paddingBottom:8,paddingTop:2,WebkitOverflowScrolling:"touch",scrollbarWidth:"none"}}
               onClick={e=>e.stopPropagation()}>
               {chips.map(item=>(
                 <SwipeChip key={item.id} item={item} tab={tab}
@@ -449,7 +448,7 @@ function App(){
           </div>
 
           {/* SPLIT TIMELINE — fixed height, no scroll */}
-          <div style={{flex:1,overflow:"hidden",display:"flex",gap:6,padding:"0 12px",minHeight:0}}>
+          <div style={{flex:1,overflow:"hidden",display:"flex",gap:10,padding:"0 12px",minHeight:0}}>
             <TimelineCol col={0}/>
             <TimelineCol col={1}/>
           </div>
