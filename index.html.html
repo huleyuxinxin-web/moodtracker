@@ -4,40 +4,42 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
   <title>☀️ Mood Tracker</title>
-  <meta name="theme-color" content="#f2f2f7"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
   <meta name="apple-mobile-web-app-title" content="Mood Tracker"/>
   <style>
     *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
     body{font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;background:#f2f2f7;color:#1c1c1e;height:100dvh;overflow:hidden;}
-    #app{height:100dvh;display:flex;flex-direction:column;max-width:480px;margin:0 auto;}
     input,button{font-family:inherit;}
   </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app" style="height:100dvh;display:flex;flex-direction:column;max-width:480px;margin:0 auto;"></div>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
 
-const HOUR_HEIGHT=52,TOTAL_HOURS=24,TL_H=HOUR_HEIGHT*TOTAL_HOURS;
+const HOUR_H=36;
+const TOTAL_H=24;
+const TL_H=HOUR_H*TOTAL_H;
+const HANDLE_H=24;
+const LONG_PRESS_MS=600;
+
 const DEF_MOODS=[{name:"Happy",color:"#F6A623"},{name:"Calm",color:"#27AE60"},{name:"Anxious",color:"#E74C3C"},{name:"Focused",color:"#2980B9"},{name:"Tired",color:"#8E44AD"}];
 const DEF_ACTS=[{name:"Exercise",color:"#E67E22"},{name:"Meals",color:"#C0392B"},{name:"Work",color:"#1A5276"},{name:"Social",color:"#6C3483"},{name:"Sleep",color:"#1A8FA0"}];
 const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
-function toY(h,m=0){return(h+m/60)*HOUR_HEIGHT;}
-function toTime(y){const t=Math.max(0,Math.min(TL_H-1,y));const h=Math.floor(t/HOUR_HEIGHT);const m=Math.round(((t%HOUR_HEIGHT)/HOUR_HEIGHT)*60);return{h:Math.min(h,23),m};}
+function toY(h,m=0){return(h+m/60)*HOUR_H;}
+function toTime(y){const t=Math.max(0,Math.min(TL_H-1,y));const h=Math.floor(t/HOUR_H);const m=Math.round(((t%HOUR_H)/HOUR_H)*60);return{h:Math.min(h,23),m};}
 function fmt(h,m){return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;}
 function today(){return new Date().toISOString().slice(0,10);}
 function rgba(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b},${a})`;}
 function durMins(b){return Math.max(0,(b.eh*60+b.em)-(b.sh*60+b.sm));}
 function load(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch{return fb;}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
-
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
 
 function App(){
@@ -54,26 +56,33 @@ function App(){
   useEffect(()=>save("mt_mb",mBlocks),[mBlocks]);
   useEffect(()=>save("mt_ab",aBlocks),[aBlocks]);
 
+  // Drag from chip
   const [drag,setDrag]=useState(null);
   const [gPos,setGPos]=useState(null);
-  const [gH,setGH]=useState(HOUR_HEIGHT);
+  const [gH,setGH]=useState(HOUR_H*2);
   const [preview,setPreview]=useState(null);
-  const dgH=useRef(HOUR_HEIGHT);
-  const bdRef=useRef(null);
-  const mTl=useRef(null);
-  const aTl=useRef(null);
-  const lpTimer=useRef(null);
-  const [ctx,setCtx]=useState(null);
+  const dgH=useRef(HOUR_H*2);
+
+  // Context menu
+  const [ctx,setCtx]=useState(null); // {b, type, x, y}
+
+  // Modals
   const [editBlk,setEditBlk]=useState(null);
   const [newMoodModal,setNewMoodModal]=useState(false);
-  const [newNm,setNewNm]=useState("");
-  const [newNc,setNewNc]=useState("#a0c4ff");
+  const [newNm,setNewNm]=useState(""); const [newNc,setNewNc]=useState("#a0c4ff");
   const [newActModal,setNewActModal]=useState(false);
-  const [newAn,setNewAn]=useState("");
-  const [newAc,setNewAc]=useState("#fd9644");
+  const [newAn,setNewAn]=useState(""); const [newAc,setNewAc]=useState("#fd9644");
   const [editDef,setEditDef]=useState(null);
-  const [edn,setEdn]=useState("");
-  const [edc,setEdc]=useState("");
+  const [edn,setEdn]=useState(""); const [edc,setEdc]=useState("");
+
+  const mTl=useRef(null);
+  const aTl=useRef(null);
+
+  // scroll to 6am on tab change
+  useEffect(()=>{
+    const ref=tab==="mood"?mTl:aTl;
+    if(ref.current) setTimeout(()=>{if(ref.current)ref.current.scrollTop=toY(6);},60);
+  },[tab]);
 
   const isMood=tab==="mood";
   const tlRef=isMood?mTl:aTl;
@@ -102,7 +111,6 @@ function App(){
   function addDef(type,name,color){
     const d={id:uid(),name,color};
     if(type==="mood")setMDefs(x=>[...x,d]);else setADefs(x=>[...x,d]);
-    return d;
   }
   function updDef(type,id,patch){
     if(type==="mood")setMDefs(x=>x.map(d=>d.id===id?{...d,...patch}:d));
@@ -114,18 +122,19 @@ function App(){
     setEditDef(null);
   }
 
+  // ── DRAG FROM CHIP ──────────────────────────────────────────────
   function startDrag(e,item){
     e.preventDefault();
     const cy=e.touches?e.touches[0].clientY:e.clientY;
     const cx=e.touches?e.touches[0].clientX:e.clientX;
-    dgH.current=HOUR_HEIGHT;setGH(HOUR_HEIGHT);
+    dgH.current=HOUR_H*2;setGH(HOUR_H*2);
     setDrag(item);setGPos({x:cx,y:cy});
   }
-
   useEffect(()=>{
     if(!drag)return;
     const ref=drag.type==="mood"?mTl:aTl;
     function mv(e){
+      e.preventDefault();
       const cy=e.touches?e.touches[0].clientY:e.clientY;
       const cx=e.touches?e.touches[0].clientX:e.clientX;
       setGPos({x:cx,y:cy});
@@ -162,52 +171,69 @@ function App(){
     e.preventDefault();e.stopPropagation();
     const sy=e.touches?e.touches[0].clientY:e.clientY;
     const sh=dgH.current;
-    function mv(ev){const cy=ev.touches?ev.touches[0].clientY:ev.clientY;const nh=Math.max(HOUR_HEIGHT*0.4,sh+(cy-sy));dgH.current=nh;setGH(nh);}
+    function mv(ev){ev.preventDefault();const cy=ev.touches?ev.touches[0].clientY:ev.clientY;const nh=Math.max(HOUR_H*0.5,sh+(cy-sy));dgH.current=nh;setGH(nh);}
     function up(){window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);}
     window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
     window.addEventListener("touchmove",mv,{passive:false});window.addEventListener("touchend",up);
   }
 
+  // ── BLOCK MOVE ──────────────────────────────────────────────────
   function startMove(e,block,type){
     e.stopPropagation();e.preventDefault();
     const ref=type==="mood"?mTl:aTl;
     const cy0=e.touches?e.touches[0].clientY:e.clientY;
     const rect=ref.current.getBoundingClientRect();
-    const offset=(cy0-rect.top+ref.current.scrollTop)-toY(block.sh,block.sm);
     const dur=toY(block.eh,block.em)-toY(block.sh,block.sm);
+    const offset=(cy0-rect.top+ref.current.scrollTop)-toY(block.sh,block.sm);
     function mv(ev){
-      bdRef.current=true;
+      ev.preventDefault();
       const cy=ev.touches?ev.touches[0].clientY:ev.clientY;
       const raw=cy-rect.top+ref.current.scrollTop-offset;
       const cY=Math.max(0,Math.min(TL_H-dur-1,raw));
       const s=toTime(cY);const en=toTime(Math.min(TL_H-1,cY+dur));
       updBlock(type,block.id,{sh:s.h,sm:s.m,eh:en.h,em:en.m});
     }
-    function up(){window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);setTimeout(()=>{bdRef.current=null;},50);}
+    function up(){window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);}
     window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
     window.addEventListener("touchmove",mv,{passive:false});window.addEventListener("touchend",up);
   }
 
+  // ── BLOCK RESIZE ────────────────────────────────────────────────
   function startResize(e,block,type){
     e.stopPropagation();e.preventDefault();
     const ref=type==="mood"?mTl:aTl;
     const rect=ref.current.getBoundingClientRect();
     function mv(ev){
-      bdRef.current=true;
+      ev.preventDefault();
       const cy=ev.touches?ev.touches[0].clientY:ev.clientY;
       const y=cy-rect.top+ref.current.scrollTop;
-      const minEnd=toY(block.sh,block.sm)+HOUR_HEIGHT*0.25;
+      const minEnd=toY(block.sh,block.sm)+HOUR_H*0.5;
       const en=toTime(Math.max(minEnd,Math.min(TL_H-1,y)));
       updBlock(type,block.id,{eh:en.h,em:en.m});
     }
-    function up(){window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);setTimeout(()=>{bdRef.current=null;},50);}
+    function up(){window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);}
     window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
     window.addEventListener("touchmove",mv,{passive:false});window.addEventListener("touchend",up);
   }
 
-  function onRC(e,b,type){e.preventDefault();e.stopPropagation();setCtx({b,type,x:e.clientX,y:e.clientY});}
-  function onTS(e,b,type){lpTimer.current=setTimeout(()=>{const t=e.touches[0];setCtx({b,type,x:t.clientX,y:t.clientY});},500);}
-  function onTE(){clearTimeout(lpTimer.current);}
+  // ── LONG PRESS on block body → context menu ─────────────────────
+  const lpTimer=useRef(null);
+  const lpMoved=useRef(false);
+
+  function onBlockTouchStart(e,b,type){
+    lpMoved.current=false;
+    lpTimer.current=setTimeout(()=>{
+      if(!lpMoved.current){
+        const t=e.touches[0];
+        setCtx({b,type,x:t.clientX,y:t.clientY});
+        // vibrate if supported
+        if(navigator.vibrate) navigator.vibrate(40);
+      }
+    },LONG_PRESS_MS);
+  }
+  function onBlockTouchMove(){lpMoved.current=true;clearTimeout(lpTimer.current);}
+  function onBlockTouchEnd(){clearTimeout(lpTimer.current);}
+  function onBlockRightClick(e,b,type){e.preventDefault();e.stopPropagation();setCtx({b,type,x:e.clientX,y:e.clientY});}
 
   function chDate(d){const dt=new Date(date);dt.setDate(dt.getDate()+d);setDate(dt.toISOString().slice(0,10));}
   function freq(id,blocks){return Object.values(blocks).flat().filter(b=>b.defId===id).length;}
@@ -228,7 +254,7 @@ function App(){
           const mS=toY(mb.sh,mb.sm),mE=toY(mb.eh,mb.em);
           const aS=toY(ab.sh,ab.sm),aE=toY(ab.eh,ab.em);
           const o=Math.max(0,Math.min(mE,aE)-Math.max(mS,aS));
-          const oMin=Math.round(o/HOUR_HEIGHT*60);
+          const oMin=Math.round(o/HOUR_H*60);
           if(oMin>0&&ov[mb.defId]?.[ab.defId]!==undefined)ov[mb.defId][ab.defId]+=oMin;
         });
       });
@@ -239,86 +265,100 @@ function App(){
   const dObj=new Date(date+"T00:00:00");
   const dateLabel=`${DAYS[dObj.getDay()]}, ${dObj.getDate()} ${MONTHS[dObj.getMonth()]}`;
 
-  function Timeline(){
-    return(
-      <div ref={tlRef} style={{flex:1,overflowY:"auto",position:"relative",margin:"0 16px",borderRadius:14,background:"#fff",boxShadow:"0 1px 6px rgba(0,0,0,0.07)",touchAction:"pan-y"}}>
-        {Array.from({length:13},(_,i)=>(
-          <div key={i} style={{position:"absolute",top:i*HOUR_HEIGHT*2,left:48,right:0,borderTop:i===0?"none":"1px solid #f0f0f0",pointerEvents:"none"}}>
-            <span style={{position:"absolute",left:-48,top:i===0?2:-8,fontSize:10,color:"#aaa",width:40,textAlign:"right"}}>{String(i*2).padStart(2,"0")}:00</span>
-          </div>
-        ))}
-        {Array.from({length:TOTAL_HOURS+1},(_,i)=>(i%2!==0&&
-          <div key={`m${i}`} style={{position:"absolute",top:i*HOUR_HEIGHT,left:48,right:0,borderTop:"1px solid #f8f8f8",pointerEvents:"none"}}/>
-        ))}
-        {preview&&(
-          <div style={{position:"absolute",left:52,right:8,top:toY(preview.sh,preview.sm),height:Math.max(18,toY(preview.eh,preview.em)-toY(preview.sh,preview.sm)),borderRadius:8,background:rgba(preview.color,0.15),border:`1.5px dashed ${preview.color}`,pointerEvents:"none",zIndex:3}}>
-            <div style={{padding:"3px 8px",fontSize:11,color:preview.color,fontWeight:600}}>{fmt(preview.sh,preview.sm)} – {fmt(preview.eh,preview.em)}</div>
-          </div>
-        )}
-        {curBlocks.map(b=>{
-          const def=curDefs.find(d=>d.id===b.defId)||{color:"#aaa",name:"?"};
-          const top=toY(b.sh,b.sm);
-          const height=Math.max(18,toY(b.eh,b.em)-top);
-          return(
-            <div key={b.id}
-              onMouseDown={e=>{if(e.button===0)startMove(e,b,tab);}}
-              onTouchStart={e=>{onTS(e,b,tab);startMove(e,b,tab);}}
-              onTouchEnd={onTE}
-              onContextMenu={e=>onRC(e,b,tab)}
-              style={{position:"absolute",left:52,right:8,top,height,borderRadius:8,background:rgba(def.color,0.18),border:`1.5px solid ${rgba(def.color,0.6)}`,cursor:"grab",overflow:"hidden",touchAction:"none",zIndex:2}}>
-              <div style={{padding:"3px 8px",fontSize:11,fontWeight:700,color:def.color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",pointerEvents:"none"}}>
-                {def.name} <span style={{fontWeight:500,opacity:.7}}>{fmt(b.sh,b.sm)}–{fmt(b.eh,b.em)}</span>
-              </div>
-              <div onMouseDown={e=>{e.stopPropagation();startResize(e,b,tab);}}
-                onTouchStart={e=>{e.stopPropagation();clearTimeout(lpTimer.current);startResize(e,b,tab);}}
-                style={{position:"absolute",bottom:0,left:0,right:0,height:12,cursor:"s-resize",display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none"}}>
-                <div style={{width:20,height:2,borderRadius:2,background:rgba(def.color,0.3)}}/>
-              </div>
-            </div>
-          );
-        })}
-        <div style={{height:TL_H}}/>
-      </div>
-    );
-  }
-
   return(
-    <div style={{display:"flex",flexDirection:"column",height:"100dvh",userSelect:"none"}} onClick={()=>setCtx(null)}>
+    <div style={{display:"flex",flexDirection:"column",height:"100dvh",userSelect:"none",background:"#f2f2f7"}} onClick={()=>setCtx(null)}>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
 
-        {(tab==="mood"||tab==="activity")&&(
-          <>
-            <div style={{padding:"16px 20px 0",flexShrink:0}}>
-              <h1 style={{fontSize:20,fontWeight:800,color:"#1c1c1e",marginBottom:14}}>☀️ Mood Tracker</h1>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-                <button onClick={()=>chDate(-1)} style={NB}>‹</button>
-                <span style={{fontSize:14,fontWeight:600,color:"#3a3a3c"}}>{dateLabel}</span>
-                <button onClick={()=>chDate(1)} style={NB}>›</button>
-              </div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:7,alignItems:"center",marginBottom:12}}>
-                {chips.map(item=>(
-                  <div key={item.id} draggable
-                    onMouseDown={e=>startDrag(e,{...item,type:tab})}
-                    onTouchStart={e=>startDrag(e,{...item,type:tab})}
-                    onDoubleClick={()=>{setEditDef({...item,type:tab});setEdn(item.name);setEdc(item.color);}}
-                    style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:20,background:"#fff",border:`1.5px solid ${rgba(item.color,0.5)}`,cursor:"grab",fontSize:12,fontWeight:600,color:"#1c1c1e",touchAction:"none",boxShadow:`0 1px 4px ${rgba(item.color,0.15)}`}}>
-                    <span style={{width:9,height:9,borderRadius:2,background:item.color,display:"inline-block"}}/>
-                    {item.name}
-                  </div>
-                ))}
-                <button onClick={()=>isMood?setNewMoodModal(true):setNewActModal(true)}
-                  style={{padding:"6px 11px",borderRadius:20,border:"1.5px dashed #ccc",background:"transparent",color:"#aaa",cursor:"pointer",fontSize:13,fontWeight:600}}>＋</button>
-              </div>
+        {(tab==="mood"||tab==="activity")&&(<>
+          <div style={{padding:"14px 16px 0",flexShrink:0}}>
+            <h1 style={{fontSize:19,fontWeight:800,color:"#1c1c1e",marginBottom:12}}>☀️ Mood Tracker</h1>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <button onClick={()=>chDate(-1)} style={NB}>‹</button>
+              <span style={{fontSize:14,fontWeight:600,color:"#3a3a3c"}}>{dateLabel}</span>
+              <button onClick={()=>chDate(1)} style={NB}>›</button>
             </div>
-            <Timeline/>
-            <div style={{height:8}}/>
-          </>
-        )}
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:10}}>
+              {chips.map(item=>(
+                <div key={item.id} draggable
+                  onMouseDown={e=>startDrag(e,{...item,type:tab})}
+                  onTouchStart={e=>startDrag(e,{...item,type:tab})}
+                  onDoubleClick={()=>{setEditDef({...item,type:tab});setEdn(item.name);setEdc(item.color);}}
+                  style={{display:"flex",alignItems:"center",gap:5,padding:"7px 13px",borderRadius:20,background:"#fff",border:`1.5px solid ${rgba(item.color,0.5)}`,cursor:"grab",fontSize:13,fontWeight:600,color:"#1c1c1e",touchAction:"none",boxShadow:`0 1px 4px ${rgba(item.color,0.15)}`}}>
+                  <span style={{width:9,height:9,borderRadius:2,background:item.color,display:"inline-block"}}/>
+                  {item.name}
+                </div>
+              ))}
+              <button onClick={()=>isMood?setNewMoodModal(true):setNewActModal(true)}
+                style={{padding:"7px 12px",borderRadius:20,border:"1.5px dashed #ccc",background:"transparent",color:"#aaa",cursor:"pointer",fontSize:14,fontWeight:600}}>＋</button>
+            </div>
+          </div>
+
+          {/* TIMELINE */}
+          <div ref={tlRef} style={{flex:1,overflowY:"auto",position:"relative",margin:"0 16px",borderRadius:14,background:"#fff",boxShadow:"0 1px 6px rgba(0,0,0,0.07)",touchAction:"pan-y",WebkitOverflowScrolling:"touch"}}>
+            {Array.from({length:13},(_,i)=>(
+              <div key={i} style={{position:"absolute",top:i*HOUR_H*2,left:46,right:0,borderTop:i===0?"none":"1px solid #f0f0f0",pointerEvents:"none"}}>
+                <span style={{position:"absolute",left:-46,top:i===0?2:-8,fontSize:10,color:"#bbb",width:38,textAlign:"right"}}>{String(i*2).padStart(2,"0")}:00</span>
+              </div>
+            ))}
+            {Array.from({length:TOTAL_H+1},(_,i)=>(i%2!==0&&
+              <div key={`m${i}`} style={{position:"absolute",top:i*HOUR_H,left:46,right:0,borderTop:"1px solid #f8f8f8",pointerEvents:"none"}}/>
+            ))}
+
+            {preview&&(
+              <div style={{position:"absolute",left:50,right:6,top:toY(preview.sh,preview.sm),height:Math.max(HANDLE_H*2,toY(preview.eh,preview.em)-toY(preview.sh,preview.sm)),borderRadius:10,background:rgba(preview.color,0.15),border:`2px dashed ${preview.color}`,pointerEvents:"none",zIndex:3}}>
+                <div style={{padding:"3px 8px",fontSize:11,color:preview.color,fontWeight:700}}>{fmt(preview.sh,preview.sm)} – {fmt(preview.eh,preview.em)}</div>
+              </div>
+            )}
+
+            {curBlocks.map(b=>{
+              const def=curDefs.find(d=>d.id===b.defId)||{color:"#aaa",name:"?"};
+              const top=toY(b.sh,b.sm);
+              const height=Math.max(HANDLE_H*2+8,toY(b.eh,b.em)-top);
+              return(
+                <div key={b.id}
+                  onContextMenu={e=>onBlockRightClick(e,b,tab)}
+                  onTouchStart={e=>onBlockTouchStart(e,b,tab)}
+                  onTouchMove={onBlockTouchMove}
+                  onTouchEnd={onBlockTouchEnd}
+                  style={{position:"absolute",left:50,right:6,top,height,borderRadius:10,background:rgba(def.color,0.12),border:`1.5px solid ${rgba(def.color,0.6)}`,overflow:"hidden",zIndex:2}}>
+
+                  {/* TOP HANDLE — move */}
+                  <div
+                    onMouseDown={e=>startMove(e,b,tab)}
+                    onTouchStart={e=>{clearTimeout(lpTimer.current);startMove(e,b,tab);}}
+                    style={{position:"absolute",top:0,left:0,right:0,height:HANDLE_H,background:rgba(def.color,0.28),display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 10px",cursor:"grab",touchAction:"none",borderRadius:"10px 10px 0 0",zIndex:3}}>
+                    <span style={{fontSize:11,fontWeight:700,color:def.color,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{def.name}</span>
+                    <span style={{fontSize:11,color:rgba(def.color,0.7),marginLeft:6,flexShrink:0}}>{fmt(b.sh,b.sm)}</span>
+                    <span style={{fontSize:16,color:rgba(def.color,0.45),marginLeft:8,lineHeight:1}}>⠿</span>
+                  </div>
+
+                  {/* MIDDLE label */}
+                  {height>HANDLE_H*2+20&&(
+                    <div style={{position:"absolute",top:HANDLE_H,left:0,right:0,bottom:HANDLE_H,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+                      <span style={{fontSize:11,color:rgba(def.color,0.55)}}>{fmt(b.sh,b.sm)} – {fmt(b.eh,b.em)}</span>
+                    </div>
+                  )}
+
+                  {/* BOTTOM HANDLE — resize */}
+                  <div
+                    onMouseDown={e=>{e.stopPropagation();startResize(e,b,tab);}}
+                    onTouchStart={e=>{clearTimeout(lpTimer.current);e.stopPropagation();startResize(e,b,tab);}}
+                    style={{position:"absolute",bottom:0,left:0,right:0,height:HANDLE_H,background:rgba(def.color,0.2),display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 10px",cursor:"s-resize",touchAction:"none",borderRadius:"0 0 10px 10px",zIndex:3}}>
+                    <span style={{fontSize:11,color:rgba(def.color,0.65)}}>{fmt(b.eh,b.em)}</span>
+                    <span style={{fontSize:16,color:rgba(def.color,0.45),lineHeight:1}}>↕</span>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{height:TL_H}}/>
+          </div>
+          <div style={{height:6}}/>
+        </>)}
 
         {tab==="stats"&&(
           <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
-            <div style={{padding:"16px 20px 0",flexShrink:0}}>
-              <h1 style={{fontSize:20,fontWeight:800,color:"#1c1c1e",marginBottom:14}}>☀️ Mood Tracker</h1>
+            <div style={{padding:"14px 16px 0",flexShrink:0}}>
+              <h1 style={{fontSize:19,fontWeight:800,color:"#1c1c1e",marginBottom:12}}>☀️ Mood Tracker</h1>
               <div style={{display:"flex",gap:6,marginBottom:4}}>
                 {[["week","Week"],["month","Month"]].map(([k,l])=>(
                   <button key={k} onClick={()=>setSv(k)}
@@ -328,7 +368,7 @@ function App(){
                 ))}
               </div>
             </div>
-            <div style={{flex:1,overflowY:"auto",padding:"14px 16px 100px"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"12px 16px 100px"}}>
               <Stats mDefs={mDefs} aDefs={aDefs} statsData={statsData} sv={sv}/>
             </div>
           </div>
@@ -339,34 +379,34 @@ function App(){
       <div style={{display:"flex",background:"#fff",borderTop:"1px solid #e5e5ea",flexShrink:0,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
         {[["mood","😶","Mood"],["activity","⚡","Activity"],["stats","📊","Stats"]].map(([k,icon,l])=>(
           <button key={k} onClick={()=>setTab(k)}
-            style={{flex:1,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent",color:tab===k?"#1c1c1e":"#aeaeb2",display:"flex",flexDirection:"column",alignItems:"center",gap:3,fontSize:18}}>
+            style={{flex:1,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent",color:tab===k?"#1c1c1e":"#aeaeb2",display:"flex",flexDirection:"column",alignItems:"center",gap:3,fontSize:20}}>
             <span>{icon}</span>
             <span style={{fontSize:10,fontWeight:700}}>{l}</span>
           </button>
         ))}
       </div>
 
-      {/* GHOST */}
+      {/* DRAG GHOST */}
       {drag&&gPos&&(
-        <div style={{position:"fixed",left:gPos.x-60,top:gPos.y,width:120,height:gH,borderRadius:8,background:rgba(drag.color,0.2),border:`2px solid ${drag.color}`,pointerEvents:"none",zIndex:999}}>
-          <div style={{padding:"4px 8px",fontSize:11,fontWeight:700,color:drag.color}}>{drag.name}</div>
+        <div style={{position:"fixed",left:gPos.x-70,top:gPos.y,width:140,height:gH,borderRadius:10,background:rgba(drag.color,0.2),border:`2px solid ${drag.color}`,pointerEvents:"none",zIndex:999}}>
+          <div style={{padding:"6px 10px",fontSize:12,fontWeight:700,color:drag.color}}>{drag.name}</div>
           <div onMouseDown={startGhostResize} onTouchStart={startGhostResize}
-            style={{position:"absolute",bottom:0,left:0,right:0,height:12,cursor:"s-resize",pointerEvents:"all",display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <div style={{width:20,height:2,borderRadius:2,background:rgba(drag.color,0.4)}}/>
+            style={{position:"absolute",bottom:0,left:0,right:0,height:HANDLE_H,background:rgba(drag.color,0.2),display:"flex",alignItems:"center",justifyContent:"center",cursor:"s-resize",pointerEvents:"all",borderRadius:"0 0 10px 10px"}}>
+            <span style={{fontSize:16,color:rgba(drag.color,0.6)}}>↕</span>
           </div>
         </div>
       )}
 
-      {/* CTX MENU */}
+      {/* CONTEXT MENU */}
       {ctx&&(
-        <div style={{position:"fixed",left:Math.min(ctx.x,window.innerWidth-160),top:Math.min(ctx.y,window.innerHeight-100),background:"#fff",borderRadius:12,boxShadow:"0 4px 24px rgba(0,0,0,0.13)",zIndex:300,overflow:"hidden",minWidth:150,border:"1px solid #e5e5ea"}} onClick={e=>e.stopPropagation()}>
-          <button onClick={()=>{setEditBlk({b:ctx.b,type:ctx.type});setCtx(null);}} style={CB}>✏️ Edit block</button>
-          <div style={{height:1,background:"#f2f2f7",margin:"0 12px"}}/>
-          <button onClick={()=>delBlock(ctx.type,ctx.b.id)} style={{...CB,color:"#E74C3C"}}>🗑️ Delete block</button>
+        <div style={{position:"fixed",left:Math.min(ctx.x,window.innerWidth-170),top:Math.min(ctx.y,window.innerHeight-110),background:"#fff",borderRadius:14,boxShadow:"0 8px 30px rgba(0,0,0,0.15)",zIndex:400,overflow:"hidden",minWidth:160,border:"1px solid #e5e5ea"}} onClick={e=>e.stopPropagation()}>
+          <button onClick={()=>{setEditBlk({b:ctx.b,type:ctx.type});setCtx(null);}} style={CB}>✏️&nbsp; Edit block</button>
+          <div style={{height:1,background:"#f2f2f7",margin:"0 14px"}}/>
+          <button onClick={()=>delBlock(ctx.type,ctx.b.id)} style={{...CB,color:"#E74C3C"}}>🗑️&nbsp; Delete block</button>
         </div>
       )}
 
-      {/* EDIT BLOCK */}
+      {/* EDIT BLOCK MODAL */}
       {editBlk&&(
         <Modal title="Edit block" onClose={()=>setEditBlk(null)}>
           {(()=>{
@@ -377,13 +417,13 @@ function App(){
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{width:13,height:13,borderRadius:3,background:def.color,display:"inline-block"}}/>
                   <span style={{fontWeight:700,fontSize:15}}>{def.name}</span>
+                  <span style={{color:"#aaa",fontSize:13,marginLeft:4}}>{fmt(editBlk.b.sh,editBlk.b.sm)} – {fmt(editBlk.b.eh,editBlk.b.em)}</span>
                 </div>
-                <span style={{color:"#888",fontSize:13}}>{fmt(editBlk.b.sh,editBlk.b.sm)} → {fmt(editBlk.b.eh,editBlk.b.em)}</span>
                 <p style={{fontSize:12,color:"#aaa",margin:0}}>Change {editBlk.type}:</p>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
                   {defs.map(d=>(
                     <button key={d.id} onClick={()=>{updBlock(editBlk.type,editBlk.b.id,{defId:d.id});setEditBlk(null);}}
-                      style={{padding:"7px 12px",borderRadius:8,border:`1.5px solid ${rgba(d.color,0.5)}`,background:rgba(d.color,0.1),color:d.color,cursor:"pointer",fontSize:12,fontWeight:700}}>{d.name}</button>
+                      style={{padding:"8px 14px",borderRadius:8,border:`1.5px solid ${rgba(d.color,0.5)}`,background:rgba(d.color,0.1),color:d.color,cursor:"pointer",fontSize:13,fontWeight:700}}>{d.name}</button>
                   ))}
                 </div>
                 <button onClick={()=>delBlock(editBlk.type,editBlk.b.id)} style={{...BS,background:"#E74C3C",marginTop:4}}>Delete block</button>
@@ -393,39 +433,42 @@ function App(){
         </Modal>
       )}
 
+      {/* NEW MOOD */}
       {newMoodModal&&(
         <Modal title="New mood" onClose={()=>setNewMoodModal(false)}>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <input value={newNm} onChange={e=>setNewNm(e.target.value)} placeholder="Mood name" style={IS} autoFocus/>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:12,color:"#aaa"}}>Color</span>
-              <input type="color" value={newNc} onChange={e=>setNewNc(e.target.value)} style={{width:40,height:30,border:"none",background:"none",cursor:"pointer"}}/>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:13,color:"#aaa"}}>Color</span>
+              <input type="color" value={newNc} onChange={e=>setNewNc(e.target.value)} style={{width:44,height:34,border:"none",background:"none",cursor:"pointer"}}/>
             </div>
             <button onClick={()=>{if(!newNm.trim())return;addDef("mood",newNm.trim(),newNc);setNewNm("");setNewNc("#a0c4ff");setNewMoodModal(false);}} style={BS}>Add mood</button>
           </div>
         </Modal>
       )}
 
+      {/* NEW ACTIVITY */}
       {newActModal&&(
         <Modal title="New activity" onClose={()=>setNewActModal(false)}>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <input value={newAn} onChange={e=>setNewAn(e.target.value)} placeholder="Activity name" style={IS} autoFocus/>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:12,color:"#aaa"}}>Color</span>
-              <input type="color" value={newAc} onChange={e=>setNewAc(e.target.value)} style={{width:40,height:30,border:"none",background:"none",cursor:"pointer"}}/>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:13,color:"#aaa"}}>Color</span>
+              <input type="color" value={newAc} onChange={e=>setNewAc(e.target.value)} style={{width:44,height:34,border:"none",background:"none",cursor:"pointer"}}/>
             </div>
             <button onClick={()=>{if(!newAn.trim())return;addDef("activity",newAn.trim(),newAc);setNewAn("");setNewAc("#fd9644");setNewActModal(false);}} style={BS}>Add activity</button>
           </div>
         </Modal>
       )}
 
+      {/* EDIT DEF */}
       {editDef&&(
         <Modal title={`Edit ${editDef.type}`} onClose={()=>setEditDef(null)}>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <input value={edn} onChange={e=>setEdn(e.target.value)} style={IS}/>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:12,color:"#aaa"}}>Color</span>
-              <input type="color" value={edc} onChange={e=>setEdc(e.target.value)} style={{width:40,height:30,border:"none",background:"none",cursor:"pointer"}}/>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:13,color:"#aaa"}}>Color</span>
+              <input type="color" value={edc} onChange={e=>setEdc(e.target.value)} style={{width:44,height:34,border:"none",background:"none",cursor:"pointer"}}/>
             </div>
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>{updDef(editDef.type,editDef.id,{name:edn,color:edc});setEditDef(null);}} style={{...BS,flex:1}}>Save</button>
@@ -504,11 +547,11 @@ function Stats({mDefs,aDefs,statsData,sv}){
 
 function Modal({title,children,onClose}){
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.35)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
-      <div style={{background:"#fff",borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:480,boxShadow:"0 -4px 30px rgba(0,0,0,0.12)"}} onClick={e=>e.stopPropagation()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+      <div style={{background:"#fff",borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:480,boxShadow:"0 -4px 30px rgba(0,0,0,0.1)"}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
           <span style={{fontSize:16,fontWeight:700,color:"#1c1c1e"}}>{title}</span>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#aaa",cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#aaa",cursor:"pointer",fontSize:22,lineHeight:1}}>✕</button>
         </div>
         {children}
       </div>
@@ -516,13 +559,14 @@ function Modal({title,children,onClose}){
   );
 }
 
-const IS={background:"#f2f2f7",border:"1.5px solid #e5e5ea",borderRadius:8,padding:"9px 12px",color:"#1c1c1e",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
-const BS={background:"#1c1c1e",border:"none",borderRadius:8,padding:"10px 16px",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"};
-const NB={background:"#e5e5ea",border:"none",color:"#3a3a3c",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:16,fontWeight:600};
-const CB={display:"block",width:"100%",padding:"12px 16px",background:"none",border:"none",color:"#1c1c1e",cursor:"pointer",fontSize:13,textAlign:"left",fontWeight:500};
+const IS={background:"#f2f2f7",border:"1.5px solid #e5e5ea",borderRadius:10,padding:"11px 14px",color:"#1c1c1e",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"};
+const BS={background:"#1c1c1e",border:"none",borderRadius:10,padding:"12px 16px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%"};
+const NB={background:"#e5e5ea",border:"none",color:"#3a3a3c",borderRadius:10,padding:"8px 18px",cursor:"pointer",fontSize:18,fontWeight:600};
+const CB={display:"block",width:"100%",padding:"14px 16px",background:"none",border:"none",color:"#1c1c1e",cursor:"pointer",fontSize:14,textAlign:"left",fontWeight:500};
 const SL={fontSize:11,color:"#aeaeb2",marginBottom:12,fontWeight:700,textTransform:"uppercase",letterSpacing:.8};
 
 ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
 </script>
 </body>
 </html>
+  
