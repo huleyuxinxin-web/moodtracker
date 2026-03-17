@@ -22,21 +22,17 @@
 const {useState,useEffect,useRef}=React;
 
 const HOUR_H=38;
-const HALF_H=12; // hours per column
-const COL_H=HOUR_H*HALF_H; // height of each column (0–12, 12–24)
-const HANDLE_H=20;
-const LONG_PRESS_MS=800;
+const HALF_H=12;
+const COL_H=HOUR_H*HALF_H;
+const STEP=30; // minutes per nudge
+const LONG_PRESS_MS=700;
 
 const DEF_MOODS=[{name:"Happy",color:"#F6A623"},{name:"Calm",color:"#27AE60"},{name:"Anxious",color:"#E74C3C"},{name:"Focused",color:"#2980B9"},{name:"Tired",color:"#8E44AD"}];
 const DEF_ACTS=[{name:"Exercise",color:"#E67E22"},{name:"Meals",color:"#C0392B"},{name:"Work",color:"#1A5276"},{name:"Social",color:"#6C3483"},{name:"Sleep",color:"#1A8FA0"}];
 const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
-// Convert hour+min to Y within a column (0–12h column or 12–24h column)
-function toColY(h,m=0,col){
-  const base=col*12;
-  return((h-base)+m/60)*HOUR_H;
-}
+function toColY(h,m=0,col){return((h-col*12)+m/60)*HOUR_H;}
 function colYToTime(y,col){
   const base=col*12;
   const t=Math.max(0,Math.min(COL_H-1,y));
@@ -45,26 +41,34 @@ function colYToTime(y,col){
   return{h:Math.min(h,col===0?11:23),m};
 }
 function toAbsY(h,m=0){return(h+m/60)*HOUR_H;}
-function fmt(h,m){return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;}
-function fmtDur(mins){if(mins<60)return`${mins}min`;const h=Math.floor(mins/60);const m=mins%60;return m>0?`${h}h${m}min`:`${h}h`;}
+function fmtTime(h,m){
+  const period=h<12?"a.m.":"p.m.";
+  const hh=h%12===0?12:h%12;
+  const mm=m>0?`:${String(m).padStart(2,"0")}`:"";
+  return`${hh}${mm} ${period}`;
+}
+function fmtDur(mins){
+  if(mins<=0)return"0min";
+  if(mins<60)return`${mins}min`;
+  const h=Math.floor(mins/60);
+  const m=mins%60;
+  return m>0?`${h}.${Math.round(m/60*10).toString().replace(/0$/,"")}h`:`${h}h`;
+}
 function today(){return new Date().toISOString().slice(0,10);}
 function rgba(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b},${a})`;}
 function durMins(b){return Math.max(0,(b.eh*60+b.em)-(b.sh*60+b.sm));}
+function toMins(h,m){return h*60+m;}
+function fromMins(total){return{h:Math.floor(total/60),m:total%60};}
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 function load(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch{return fb;}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
 
-// Which column does this block belong to? (blocks can span columns but we render in each)
-// For simplicity: block belongs to column of its start hour
-function blockCol(b){return b.sh<12?0:1;}
-
-// Get the rendered top/height within a column for a block
-// A block may span from col 0 into col 1 — we clip per column
 function blockInCol(b,col){
-  const colStart=col*12*60; // minutes
+  const colStart=col*12*60;
   const colEnd=(col+1)*12*60;
-  const bStart=b.sh*60+b.sm;
-  const bEnd=b.eh*60+b.em;
+  const bStart=toMins(b.sh,b.sm);
+  const bEnd=toMins(b.eh,b.em);
   const visStart=Math.max(bStart,colStart);
   const visEnd=Math.min(bEnd,colEnd);
   if(visEnd<=visStart)return null;
@@ -81,19 +85,25 @@ function App(){
   const [aDefs,setADefs]=useState(()=>load("mt_ad",DEF_ACTS.map(a=>({...a,id:uid()}))));
   const [mBlocks,setMBlocks]=useState(()=>load("mt_mb",{}));
   const [aBlocks,setABlocks]=useState(()=>load("mt_ab",{}));
+  const [selectedId,setSelectedId]=useState(null); // currently selected block id
 
   useEffect(()=>save("mt_md",mDefs),[mDefs]);
   useEffect(()=>save("mt_ad",aDefs),[aDefs]);
   useEffect(()=>save("mt_mb",mBlocks),[mBlocks]);
   useEffect(()=>save("mt_ab",aBlocks),[aBlocks]);
 
+  // Drag from chip
   const [drag,setDrag]=useState(null);
   const [gPos,setGPos]=useState(null);
   const [gH,setGH]=useState(HOUR_H*2);
-  const [preview,setPreview]=useState(null); // {col, top, height, color}
+  const [preview,setPreview]=useState(null);
   const dgH=useRef(HOUR_H*2);
-  const dragCol=useRef(null);
 
+  // Long press
+  const lpTimer=useRef(null);
+  const lpMoved=useRef(false);
+
+  // Modals
   const [editBlk,setEditBlk]=useState(null);
   const [newMoodModal,setNewMoodModal]=useState(false);
   const [newNm,setNewNm]=useState(""); const [newNc,setNewNc]=useState("#a0c4ff");
@@ -104,14 +114,13 @@ function App(){
 
   const col0Ref=useRef(null);
   const col1Ref=useRef(null);
-  const lpTimer=useRef(null);
-  const lpMoved=useRef(false);
 
   const isMood=tab==="mood";
   const dayMB=mBlocks[date]||[];
   const dayAB=aBlocks[date]||[];
   const curBlocks=isMood?dayMB:dayAB;
   const curDefs=isMood?mDefs:aDefs;
+  const selectedBlock=curBlocks.find(b=>b.id===selectedId)||null;
 
   function setMB(d,a){setMBlocks(p=>({...p,[d]:a}));}
   function setAB(d,a){setABlocks(p=>({...p,[d]:a}));}
@@ -120,6 +129,7 @@ function App(){
     const b={id:uid(),defId,sh,sm,eh,em};
     if(type==="mood")setMB(date,[...dayMB,b]);
     else setAB(date,[...dayAB,b]);
+    setSelectedId(b.id);
   }
   function updBlock(type,id,patch){
     const setter=type==="mood"?setMBlocks:setABlocks;
@@ -128,7 +138,7 @@ function App(){
   function delBlock(type,id){
     const setter=type==="mood"?setMBlocks:setABlocks;
     setter(p=>({...p,[date]:(p[date]||[]).filter(b=>b.id!==id)}));
-    setEditBlk(null);
+    setEditBlk(null); setSelectedId(null);
   }
   function addDef(type,name,color){
     const d={id:uid(),name,color};
@@ -144,24 +154,35 @@ function App(){
     setEditDef(null);
   }
 
+  // ── NUDGE selected block ────────────────────────────────────────
+  function nudgeStart(delta){
+    if(!selectedBlock)return;
+    const type=isMood?"mood":"activity";
+    const newStart=clamp(toMins(selectedBlock.sh,selectedBlock.sm)+delta,0,toMins(selectedBlock.eh,selectedBlock.em)-STEP);
+    const{h,m}=fromMins(newStart);
+    updBlock(type,selectedBlock.id,{sh:h,sm:m});
+  }
+  function nudgeEnd(delta){
+    if(!selectedBlock)return;
+    const type=isMood?"mood":"activity";
+    const newEnd=clamp(toMins(selectedBlock.eh,selectedBlock.em)+delta,toMins(selectedBlock.sh,selectedBlock.sm)+STEP,23*60+59);
+    const{h,m}=fromMins(newEnd);
+    updBlock(type,selectedBlock.id,{eh:h,em:m});
+  }
+
   // ── DRAG FROM CHIP ──────────────────────────────────────────────
   function startDrag(e,item){
     e.preventDefault();
+    setSelectedId(null);
     const cy=e.touches?e.touches[0].clientY:e.clientY;
     const cx=e.touches?e.touches[0].clientX:e.clientX;
-    dgH.current=HOUR_H*2;setGH(HOUR_H*2);
-    dragCol.current=null;
-    setDrag(item);setGPos({x:cx,y:cy});
+    dgH.current=HOUR_H*2; setGH(HOUR_H*2);
+    setDrag(item); setGPos({x:cx,y:cy});
   }
 
   function getColRef(cx){
-    if(col0Ref.current){
-      const r=col0Ref.current.getBoundingClientRect();
-      if(cx>=r.left&&cx<=r.right)return{ref:col0Ref,col:0};
-    }
-    if(col1Ref.current){
-      const r=col1Ref.current.getBoundingClientRect();
-      if(cx>=r.left&&cx<=r.right)return{ref:col1Ref,col:1};
+    for(const [ref,col] of [[col0Ref,0],[col1Ref,1]]){
+      if(ref.current){const r=ref.current.getBoundingClientRect();if(cx>=r.left&&cx<=r.right)return{ref,col};}
     }
     return null;
   }
@@ -175,99 +196,53 @@ function App(){
       setGPos({x:cx,y:cy});
       const found=getColRef(cx);
       if(found){
-        const {ref,col}=found;
+        const{ref,col}=found;
         const r=ref.current.getBoundingClientRect();
         const tY=cy-r.top+ref.current.scrollTop;
         const s=colYToTime(Math.max(0,tY),col);
-        const endY=Math.min(COL_H-1,tY+dgH.current);
-        // if block would overflow col, cap at end of col
-        const en=colYToTime(endY,col);
-        dragCol.current=col;
-        setPreview({col,top:Math.max(0,tY),height:Math.max(HANDLE_H*2,Math.min(COL_H-tY,dgH.current)),sh:s.h,sm:s.m,eh:en.h,em:en.m,color:drag.color});
-      }else{setPreview(null);dragCol.current=null;}
+        // snap start to 30min
+        const snapStart=Math.round(toMins(s.h,s.m)/STEP)*STEP;
+        const snapEnd=clamp(snapStart+HOUR_H/HOUR_H*60*2,0,col===0?12*60:24*60);
+        const endSnap=Math.round((snapStart+120)/STEP)*STEP;
+        const es=fromMins(clamp(snapStart,col*12*60,(col+1)*12*60-STEP));
+        const ee=fromMins(clamp(endSnap,col*12*60+STEP,(col+1)*12*60));
+        setPreview({col,top:Math.max(0,tY),height:Math.max(HOUR_H,Math.min(COL_H-tY,dgH.current)),sh:es.h,sm:es.m,eh:ee.h,em:ee.m,color:drag.color});
+      }else setPreview(null);
     }
     function up(e){
       const cy=e.changedTouches?e.changedTouches[0].clientY:e.clientY;
       const cx=e.changedTouches?e.changedTouches[0].clientX:e.clientX;
-      const found=getColRef(cx);
-      if(found&&preview){
-        addBlock(drag.type,drag.id,preview.sh,preview.sm,preview.eh,preview.em);
-      }
-      setDrag(null);setGPos(null);setPreview(null);dragCol.current=null;
+      if(preview) addBlock(drag.type,drag.id,preview.sh,preview.sm,preview.eh,preview.em);
+      setDrag(null);setGPos(null);setPreview(null);
     }
     window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
     window.addEventListener("touchmove",mv,{passive:false});window.addEventListener("touchend",up);
     return()=>{window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);};
-  },[drag,date,dayMB,dayAB,preview]);
+  },[drag,preview,date,dayMB,dayAB]);
 
   function startGhostResize(e){
     e.preventDefault();e.stopPropagation();
     const sy=e.touches?e.touches[0].clientY:e.clientY;
     const sh=dgH.current;
-    function mv(ev){ev.preventDefault();const cy=ev.touches?ev.touches[0].clientY:ev.clientY;const nh=Math.max(HOUR_H*0.5,sh+(cy-sy));dgH.current=nh;setGH(nh);}
+    function mv(ev){ev.preventDefault();const cy=ev.touches?ev.touches[0].clientY:ev.clientY;const nh=Math.max(HOUR_H,sh+(cy-sy));dgH.current=nh;setGH(nh);}
     function up(){window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);}
     window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
     window.addEventListener("touchmove",mv,{passive:false});window.addEventListener("touchend",up);
   }
 
-  // ── BLOCK MOVE (top handle) ─────────────────────────────────────
-  function startMove(e,block,type,col){
-    e.stopPropagation();e.preventDefault();
-    const ref=col===0?col0Ref:col1Ref;
-    const cy0=e.touches?e.touches[0].clientY:e.clientY;
-    const rect=ref.current.getBoundingClientRect();
-    const blockTopInCol=toColY(block.sh,block.sm,col);
-    const dur=durMins(block);
-    const offset=(cy0-rect.top+ref.current.scrollTop)-blockTopInCol;
-    function mv(ev){
-      ev.preventDefault();
-      const cy=ev.touches?ev.touches[0].clientY:ev.clientY;
-      const raw=cy-rect.top+ref.current.scrollTop-offset;
-      const cY=Math.max(0,Math.min(COL_H-(dur/60*HOUR_H)-1,raw));
-      const s=colYToTime(cY,col);
-      const endMins=s.h*60+s.m+dur;
-      const eh=Math.min(col===0?11:23,Math.floor(endMins/60));
-      const em=endMins%60;
-      updBlock(type,block.id,{sh:s.h,sm:s.m,eh,em});
-    }
-    function up(){window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);}
-    window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
-    window.addEventListener("touchmove",mv,{passive:false});window.addEventListener("touchend",up);
-  }
-
-  // ── BLOCK RESIZE (bottom handle) ───────────────────────────────
-  function startResize(e,block,type,col){
-    e.stopPropagation();e.preventDefault();
-    const ref=col===0?col0Ref:col1Ref;
-    const rect=ref.current.getBoundingClientRect();
-    function mv(ev){
-      ev.preventDefault();
-      const cy=ev.touches?ev.touches[0].clientY:ev.clientY;
-      const y=cy-rect.top+ref.current.scrollTop;
-      const minEnd=toColY(block.sh,block.sm,col)+HOUR_H*0.5;
-      const en=colYToTime(Math.max(minEnd,Math.min(COL_H-1,y)),col);
-      updBlock(type,block.id,{eh:en.h,em:en.m});
-    }
-    function up(){window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);window.removeEventListener("touchmove",mv);window.removeEventListener("touchend",up);}
-    window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);
-    window.addEventListener("touchmove",mv,{passive:false});window.addEventListener("touchend",up);
-  }
-
-  // ── LONG PRESS ──────────────────────────────────────────────────
-  function onBlockTouchStart(e,b,type){
+  // ── LONG PRESS → edit modal ─────────────────────────────────────
+  function onBTouchStart(e,b,type){
     lpMoved.current=false;
     lpTimer.current=setTimeout(()=>{
-      if(!lpMoved.current){
-        if(navigator.vibrate)navigator.vibrate(40);
-        setEditBlk({b,type});
-      }
+      if(!lpMoved.current){if(navigator.vibrate)navigator.vibrate(40);setEditBlk({b,type});}
     },LONG_PRESS_MS);
   }
-  function onBlockTouchMove(){lpMoved.current=true;clearTimeout(lpTimer.current);}
-  function onBlockTouchEnd(){clearTimeout(lpTimer.current);}
-  function onBlockRC(e,b,type){e.preventDefault();e.stopPropagation();setEditBlk({b,type});}
+  function onBTouchMove(){lpMoved.current=true;clearTimeout(lpTimer.current);}
+  function onBTouchEnd(){clearTimeout(lpTimer.current);}
+  function onBRC(e,b,type){e.preventDefault();e.stopPropagation();setEditBlk({b,type});}
 
-  function chDate(d){const dt=new Date(date);dt.setDate(dt.getDate()+d);setDate(dt.toISOString().slice(0,10));}
+  function chDate(d){const dt=new Date(date);dt.setDate(dt.getDate()+d);setDate(dt.toISOString().slice(0,10));setSelectedId(null);}
+
   function freq(id,blocks){return Object.values(blocks).flat().filter(b=>b.defId===id).length;}
   const sMDefs=[...mDefs].sort((a,b)=>freq(b.id,mBlocks)-freq(a.id,mBlocks));
   const sADefs=[...aDefs].sort((a,b)=>freq(b.id,aBlocks)-freq(a.id,aBlocks));
@@ -297,37 +272,32 @@ function App(){
   const dObj=new Date(date+"T00:00:00");
   const dateLabel=`${DAYS[dObj.getDay()]}, ${dObj.getDate()} ${MONTHS[dObj.getMonth()]}`;
 
-  // Render one column of the timeline
+  // ── TIMELINE COLUMN ─────────────────────────────────────────────
   function TimelineCol({col}){
     const ref=col===0?col0Ref:col1Ref;
-    const colLabel=col===0?"AM":"PM";
-    const colBlocks=curBlocks.filter(b=>{
-      const seg=blockInCol(b,col);
-      return seg!==null;
-    });
-
+    const colBlocks=curBlocks.filter(b=>blockInCol(b,col)!==null);
     return(
       <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
-        {/* Column header */}
-        <div style={{textAlign:"center",fontSize:11,fontWeight:700,color:"#aaa",padding:"4px 0 4px",letterSpacing:.5}}>{col===0?"12AM – 12PM":"12PM – 12AM"}</div>
         <div ref={ref} style={{flex:1,overflowY:"auto",position:"relative",borderRadius:10,background:"#fff",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",touchAction:"pan-y",WebkitOverflowScrolling:"touch"}}>
           {/* Hour lines */}
-          {Array.from({length:HALF_H+1},(_,i)=>(
-            <div key={i} style={{position:"absolute",top:i*HOUR_H,left:28,right:0,borderTop:i===0?"none":"1px solid #f0f0f0",pointerEvents:"none"}}>
-              <span style={{position:"absolute",left:-28,top:i===0?1:-8,fontSize:9,color:"#ccc",width:24,textAlign:"right"}}>
-                {String(col*12+i).padStart(2,"0")}
-              </span>
-            </div>
-          ))}
-          {/* Minor lines */}
-          {Array.from({length:HALF_H*2+1},(_,i)=>(i%2!==0&&
-            <div key={`m${i}`} style={{position:"absolute",top:i*(HOUR_H/2),left:28,right:0,borderTop:"1px solid #f8f8f8",pointerEvents:"none"}}/>
+          {Array.from({length:HALF_H+1},(_,i)=>{
+            const absH=col*12+i;
+            const label=fmtTime(absH,0).replace(":00","");
+            return(
+              <div key={i} style={{position:"absolute",top:i*HOUR_H,left:34,right:0,borderTop:i===0?"none":"1px solid #f0f0f0",pointerEvents:"none"}}>
+                <span style={{position:"absolute",left:-34,top:i===0?1:-8,fontSize:9,color:"#ccc",width:30,textAlign:"right",lineHeight:1.1}}>{label}</span>
+              </div>
+            );
+          })}
+          {/* Half-hour lines */}
+          {Array.from({length:HALF_H},(_,i)=>(
+            <div key={`hh${i}`} style={{position:"absolute",top:i*HOUR_H+HOUR_H/2,left:34,right:0,borderTop:"1px solid #f8f8f8",pointerEvents:"none"}}/>
           ))}
 
           {/* Drop preview */}
           {preview&&preview.col===col&&(
-            <div style={{position:"absolute",left:30,right:4,top:preview.top,height:Math.max(HANDLE_H*2,preview.height),borderRadius:8,background:rgba(preview.color,0.15),border:`2px dashed ${preview.color}`,pointerEvents:"none",zIndex:3,display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <span style={{fontSize:11,color:preview.color,fontWeight:700}}>{fmt(preview.sh,preview.sm)}–{fmt(preview.eh,preview.em)}</span>
+            <div style={{position:"absolute",left:36,right:4,top:preview.top,height:Math.max(HOUR_H,preview.height),borderRadius:8,background:rgba(preview.color,0.15),border:`2px dashed ${preview.color}`,pointerEvents:"none",zIndex:3,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{fontSize:10,color:preview.color,fontWeight:700}}>{fmtTime(preview.sh,preview.sm)}</span>
             </div>
           )}
 
@@ -336,51 +306,36 @@ function App(){
             const def=curDefs.find(d=>d.id===b.defId)||{color:"#aaa",name:"?"};
             const seg=blockInCol(b,col);
             if(!seg)return null;
-            const {top,height,isStart,isEnd}=seg;
+            const{top,height,isStart,isEnd}=seg;
             const mins=durMins(b);
-            const showLabel=height>HANDLE_H*2+8;
-
+            const isSelected=b.id===selectedId;
+            const showLabel=height>28;
             return(
               <div key={b.id}
-                onContextMenu={e=>onBlockRC(e,b,tab)}
-                onTouchStart={e=>onBlockTouchStart(e,b,tab)}
-                onTouchMove={onBlockTouchMove}
-                onTouchEnd={onBlockTouchEnd}
+                onClick={e=>{e.stopPropagation();setSelectedId(b.id===selectedId?null:b.id);}}
+                onContextMenu={e=>onBRC(e,b,tab)}
+                onTouchStart={e=>onBTouchStart(e,b,tab)}
+                onTouchMove={onBTouchMove}
+                onTouchEnd={onBTouchEnd}
                 style={{
-                  position:"absolute",left:30,right:4,top,height,
+                  position:"absolute",left:36,right:4,top,height,
                   borderRadius:isStart&&isEnd?8:isStart?"8px 8px 0 0":isEnd?"0 0 8px 8px":0,
-                  background:rgba(def.color,0.18),
-                  border:`1.5px solid ${rgba(def.color,0.55)}`,
-                  overflow:"hidden",zIndex:2,touchAction:"none"
+                  background:rgba(def.color,isSelected?0.28:0.16),
+                  border:`${isSelected?2:1.5}px solid ${rgba(def.color,isSelected?0.9:0.5)}`,
+                  overflow:"hidden",zIndex:isSelected?4:2,
+                  boxShadow:isSelected?`0 2px 12px ${rgba(def.color,0.3)}`:"none",
+                  cursor:"pointer",transition:"box-shadow .15s,border .15s"
                 }}>
-
-                {/* TOP HANDLE — only on first segment, invisible style */}
-                {isStart&&(
-                  <div
-                    onMouseDown={e=>startMove(e,b,tab,col)}
-                    onTouchStart={e=>{clearTimeout(lpTimer.current);e.stopPropagation();startMove(e,b,tab,col);}}
-                    style={{position:"absolute",top:0,left:0,right:0,height:HANDLE_H,cursor:"grab",touchAction:"none",zIndex:3,background:"transparent"}}/>
-                )}
-
-                {/* LABEL in the middle */}
                 {showLabel&&(
-                  <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",pointerEvents:"none",gap:2}}>
-                    <span style={{fontSize:11,fontWeight:700,color:def.color}}>{def.name}</span>
-                    <span style={{fontSize:10,color:rgba(def.color,0.7)}}>{fmtDur(mins)}</span>
+                  <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",pointerEvents:"none",gap:1}}>
+                    <span style={{fontSize:10,fontWeight:700,color:def.color,textAlign:"center",padding:"0 3px"}}>{def.name}</span>
+                    <span style={{fontSize:9,color:rgba(def.color,0.7)}}>{fmtDur(mins)}</span>
                   </div>
                 )}
                 {!showLabel&&(
-                  <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
-                    <span style={{fontSize:10,fontWeight:700,color:def.color,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",padding:"0 4px"}}>{def.name}</span>
+                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+                    <span style={{fontSize:9,fontWeight:700,color:def.color,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",padding:"0 3px"}}>{def.name}</span>
                   </div>
-                )}
-
-                {/* BOTTOM HANDLE — only on last segment, invisible */}
-                {isEnd&&(
-                  <div
-                    onMouseDown={e=>{e.stopPropagation();startResize(e,b,tab,col);}}
-                    onTouchStart={e=>{clearTimeout(lpTimer.current);e.stopPropagation();startResize(e,b,tab,col);}}
-                    style={{position:"absolute",bottom:0,left:0,right:0,height:HANDLE_H,cursor:"s-resize",touchAction:"none",zIndex:3,background:"transparent"}}/>
                 )}
               </div>
             );
@@ -392,17 +347,19 @@ function App(){
   }
 
   return(
-    <div style={{display:"flex",flexDirection:"column",height:"100dvh",userSelect:"none",background:"#f2f2f7"}}>
+    <div style={{display:"flex",flexDirection:"column",height:"100dvh",userSelect:"none",background:"#f2f2f7"}}
+      onClick={()=>setSelectedId(null)}>
       <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
 
         {(tab==="mood"||tab==="activity")&&(<>
-          <div style={{padding:"14px 16px 0",flexShrink:0}}>
-            <h1 style={{fontSize:19,fontWeight:800,color:"#1c1c1e",marginBottom:10}}>☀️ Mood Tracker</h1>
+          <div style={{padding:"12px 16px 0",flexShrink:0}}>
+            <h1 style={{fontSize:18,fontWeight:800,color:"#1c1c1e",marginBottom:10}}>☀️ Mood Tracker</h1>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
               <button onClick={()=>chDate(-1)} style={NB}>‹</button>
-              <span style={{fontSize:14,fontWeight:600,color:"#3a3a3c"}}>{dateLabel}</span>
+              <span style={{fontSize:13,fontWeight:600,color:"#3a3a3c"}}>{dateLabel}</span>
               <button onClick={()=>chDate(1)} style={NB}>›</button>
             </div>
+            {/* Chips */}
             <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:8}}>
               {chips.map(item=>(
                 <div key={item.id} draggable
@@ -415,7 +372,7 @@ function App(){
                 </div>
               ))}
               <button onClick={()=>isMood?setNewMoodModal(true):setNewActModal(true)}
-                style={{padding:"6px 11px",borderRadius:20,border:"1.5px dashed #ccc",background:"transparent",color:"#aaa",cursor:"pointer",fontSize:13,fontWeight:600}}>＋</button>
+                style={{padding:"6px 10px",borderRadius:20,border:"1.5px dashed #ccc",background:"transparent",color:"#aaa",cursor:"pointer",fontSize:13,fontWeight:600}}>＋</button>
             </div>
           </div>
 
@@ -424,13 +381,54 @@ function App(){
             <TimelineCol col={0}/>
             <TimelineCol col={1}/>
           </div>
+
+          {/* SELECTED BLOCK CONTROLS */}
+          {selectedBlock&&(()=>{
+            const def=curDefs.find(d=>d.id===selectedBlock.defId)||{color:"#aaa",name:"?"};
+            const type=isMood?"mood":"activity";
+            return(
+              <div onClick={e=>e.stopPropagation()} style={{flexShrink:0,margin:"6px 12px 0",background:"#fff",borderRadius:14,padding:"10px 14px",boxShadow:"0 1px 6px rgba(0,0,0,0.08)",display:"flex",alignItems:"center",gap:10}}>
+                <span style={{width:10,height:10,borderRadius:2,background:def.color,flexShrink:0,display:"inline-block"}}/>
+                <span style={{fontSize:13,fontWeight:700,color:def.color,flex:1}}>{def.name}</span>
+                {/* Start nudge */}
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                  <span style={{fontSize:9,color:"#aaa",fontWeight:600}}>START</span>
+                  <span style={{fontSize:11,fontWeight:700,color:"#1c1c1e"}}>{fmtTime(selectedBlock.sh,selectedBlock.sm)}</span>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>nudgeStart(-STEP)} style={ND}>−</button>
+                    <button onClick={()=>nudgeStart(STEP)} style={ND}>＋</button>
+                  </div>
+                </div>
+                <span style={{color:"#ddd",fontSize:16}}>→</span>
+                {/* End nudge */}
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                  <span style={{fontSize:9,color:"#aaa",fontWeight:600}}>END</span>
+                  <span style={{fontSize:11,fontWeight:700,color:"#1c1c1e"}}>{fmtTime(selectedBlock.eh,selectedBlock.em)}</span>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>nudgeEnd(-STEP)} style={ND}>−</button>
+                    <button onClick={()=>nudgeEnd(STEP)} style={ND}>＋</button>
+                  </div>
+                </div>
+                {/* Duration */}
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:32}}>
+                  <span style={{fontSize:9,color:"#aaa",fontWeight:600}}>DUR</span>
+                  <span style={{fontSize:11,fontWeight:700,color:def.color}}>{fmtDur(durMins(selectedBlock))}</span>
+                </div>
+                {/* Delete */}
+                <button onClick={()=>delBlock(type,selectedBlock.id)}
+                  style={{background:"#fff0f0",border:"none",borderRadius:8,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>
+                  🗑️
+                </button>
+              </div>
+            );
+          })()}
           <div style={{height:6}}/>
         </>)}
 
         {tab==="stats"&&(
           <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
-            <div style={{padding:"14px 16px 0",flexShrink:0}}>
-              <h1 style={{fontSize:19,fontWeight:800,color:"#1c1c1e",marginBottom:12}}>☀️ Mood Tracker</h1>
+            <div style={{padding:"12px 16px 0",flexShrink:0}}>
+              <h1 style={{fontSize:18,fontWeight:800,color:"#1c1c1e",marginBottom:10}}>☀️ Mood Tracker</h1>
               <div style={{display:"flex",gap:6,marginBottom:4}}>
                 {[["week","Week"],["month","Month"]].map(([k,l])=>(
                   <button key={k} onClick={()=>setSv(k)}
@@ -450,7 +448,7 @@ function App(){
       {/* BOTTOM BAR */}
       <div style={{display:"flex",background:"#fff",borderTop:"1px solid #e5e5ea",flexShrink:0,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
         {[["mood","😶","Mood"],["activity","⚡","Activity"],["stats","📊","Stats"]].map(([k,icon,l])=>(
-          <button key={k} onClick={()=>setTab(k)}
+          <button key={k} onClick={()=>{setTab(k);setSelectedId(null);}}
             style={{flex:1,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent",color:tab===k?"#1c1c1e":"#aeaeb2",display:"flex",flexDirection:"column",alignItems:"center",gap:3,fontSize:20}}>
             <span>{icon}</span>
             <span style={{fontSize:10,fontWeight:700}}>{l}</span>
@@ -480,7 +478,7 @@ function App(){
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{width:12,height:12,borderRadius:3,background:def.color,display:"inline-block"}}/>
                   <span style={{fontWeight:700,fontSize:15}}>{def.name}</span>
-                  <span style={{color:"#aaa",fontSize:13,marginLeft:4}}>{fmt(editBlk.b.sh,editBlk.b.sm)} – {fmt(editBlk.b.eh,editBlk.b.em)} · {fmtDur(durMins(editBlk.b))}</span>
+                  <span style={{color:"#aaa",fontSize:13,marginLeft:4}}>{fmtTime(editBlk.b.sh,editBlk.b.sm)} – {fmtTime(editBlk.b.eh,editBlk.b.em)} · {fmtDur(durMins(editBlk.b))}</span>
                 </div>
                 <p style={{fontSize:12,color:"#aaa",margin:0}}>Change {editBlk.type}:</p>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -545,8 +543,7 @@ function Stats({mDefs,aDefs,statsData,sv}){
   const{mm,ov}=statsData(sv);
   const total=Object.values(mm).reduce((a,b)=>a+b,0);
   const sorted=[...mDefs].sort((a,b)=>(mm[b.id]||0)-(mm[a.id]||0)).filter(m=>mm[m.id]>0);
-  function fd(mins){if(mins<60)return`${mins}min`;const h=Math.floor(mins/60);const m=mins%60;return m>0?`${h}h${m}min`:`${h}h`;}
-  function rgba2(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b},${a})`;}
+  function fd(mins){if(mins<60)return`${mins}min`;const h=Math.floor(mins/60);const m=mins%60;return m>0?`${h}.${Math.round(m/60*10)}h`:`${h}h`;}
   return(
     <div>
       <div style={{background:"#fff",borderRadius:14,padding:16,marginBottom:14,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
@@ -623,6 +620,7 @@ function Modal({title,children,onClose}){
 const IS={background:"#f2f2f7",border:"1.5px solid #e5e5ea",borderRadius:10,padding:"11px 14px",color:"#1c1c1e",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"};
 const BS={background:"#1c1c1e",border:"none",borderRadius:10,padding:"12px 16px",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%"};
 const NB={background:"#e5e5ea",border:"none",color:"#3a3a3c",borderRadius:10,padding:"8px 18px",cursor:"pointer",fontSize:18,fontWeight:600};
+const ND={background:"#f2f2f7",border:"none",borderRadius:6,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,fontWeight:700,color:"#3a3a3c"};
 const SL={fontSize:11,color:"#aeaeb2",marginBottom:12,fontWeight:700,textTransform:"uppercase",letterSpacing:.8};
 
 ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
