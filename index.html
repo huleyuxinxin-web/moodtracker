@@ -42,10 +42,9 @@ function colYToTime(y,col){
 }
 function toAbsY(h,m=0){return(h+m/60)*HOUR_H;}
 function fmtTime(h,m){
-  const period=h<12?"a.m.":"p.m.";
-  const hh=h%12===0?12:h%12;
-  const mm=m>0?`:${String(m).padStart(2,"0")}`:"";
-  return`${hh}${mm} ${period}`;
+  const hh=h===0?12:h>12?h-12:h;
+  const mm=m>0?String(m).padStart(2,"0"):"00";
+  return`${hh}${mm}`;
 }
 function fmtDur(mins){
   if(mins<=0)return"0min";
@@ -75,6 +74,80 @@ function blockInCol(b,col){
   const top=((visStart-colStart)/60)*HOUR_H;
   const height=((visEnd-visStart)/60)*HOUR_H;
   return{top,height,isStart:bStart>=colStart,isEnd:bEnd<=colEnd};
+}
+
+// ── SWIPE CHIP ───────────────────────────────────────────────────
+function SwipeChip({item,tab,onDragStart,onEdit,onDelete}){
+  const [swipeX,setSwipeX]=useState(0);
+  const [swiping,setSwiping]=useState(false);
+  const startXRef=useRef(null);
+  const startYRef=useRef(null);
+  const isDrag=useRef(false);
+  const DELETE_THRESHOLD=60;
+
+  function onTS(e){
+    // check if it's a drag-to-timeline intent (vertical movement)
+    startXRef.current=e.touches[0].clientX;
+    startYRef.current=e.touches[0].clientY;
+    isDrag.current=false;
+  }
+  function onTM(e){
+    if(startXRef.current===null)return;
+    const dx=e.touches[0].clientX-startXRef.current;
+    const dy=e.touches[0].clientY-startYRef.current;
+    // if moving more vertically, treat as drag to timeline
+    if(!swiping&&Math.abs(dy)>Math.abs(dx)+5){
+      isDrag.current=true;
+      onDragStart(e,{...item,type:tab});
+      return;
+    }
+    if(isDrag.current)return;
+    if(dx<0){
+      e.stopPropagation();
+      setSwiping(true);
+      setSwipeX(Math.max(-DELETE_THRESHOLD,dx));
+    }
+  }
+  function onTE(){
+    if(isDrag.current){isDrag.current=false;return;}
+    if(swipeX<=-DELETE_THRESHOLD){
+      onDelete();
+    } else {
+      setSwipeX(0);setSwiping(false);
+    }
+    startXRef.current=null;
+  }
+
+  const showDelete=swipeX<-20;
+  return(
+    <div style={{position:"relative",flexShrink:0,overflow:"hidden",borderRadius:20}}>
+      {/* Delete reveal */}
+      <div style={{position:"absolute",right:0,top:0,bottom:0,width:DELETE_THRESHOLD,background:"#E74C3C",display:"flex",alignItems:"center",justifyContent:"center",borderRadius:20,opacity:showDelete?1:0,transition:"opacity .1s"}}>
+        <span style={{fontSize:13,color:"#fff"}}>🗑️</span>
+      </div>
+      {/* Chip */}
+      <div
+        onMouseDown={e=>onDragStart(e,{...item,type:tab})}
+        onTouchStart={onTS}
+        onTouchMove={onTM}
+        onTouchEnd={onTE}
+        onDoubleClick={onEdit}
+        style={{
+          display:"flex",alignItems:"center",gap:5,padding:"6px 12px",
+          borderRadius:20,background:"#fff",
+          border:`1.5px solid ${rgba(item.color,0.45)}`,
+          cursor:"grab",fontSize:12,fontWeight:600,color:"#1c1c1e",
+          touchAction:"pan-y",
+          boxShadow:`0 1px 3px ${rgba(item.color,0.12)}`,
+          transform:`translateX(${swipeX}px)`,
+          transition:swiping?"none":"transform .2s",
+          position:"relative",zIndex:1
+        }}>
+        <span style={{width:8,height:8,borderRadius:2,background:item.color,display:"inline-block"}}/>
+        {item.name}
+      </div>
+    </div>
+  );
 }
 
 function App(){
@@ -353,26 +426,22 @@ function App(){
 
         {(tab==="mood"||tab==="activity")&&(<>
           <div style={{padding:"12px 16px 0",flexShrink:0}}>
-            <h1 style={{fontSize:18,fontWeight:800,color:"#1c1c1e",marginBottom:10}}>☀️ Mood Tracker</h1>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
               <button onClick={()=>chDate(-1)} style={NB}>‹</button>
               <span style={{fontSize:13,fontWeight:600,color:"#3a3a3c"}}>{dateLabel}</span>
               <button onClick={()=>chDate(1)} style={NB}>›</button>
             </div>
-            {/* Chips */}
-            <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:8}}>
+            {/* Chips — horizontal scroll, swipe left to delete */}
+            <div style={{display:"flex",overflowX:"auto",gap:6,alignItems:"center",marginBottom:8,paddingBottom:2,WebkitOverflowScrolling:"touch",scrollbarWidth:"none"}}
+              onClick={e=>e.stopPropagation()}>
               {chips.map(item=>(
-                <div key={item.id} draggable
-                  onMouseDown={e=>startDrag(e,{...item,type:tab})}
-                  onTouchStart={e=>startDrag(e,{...item,type:tab})}
-                  onDoubleClick={()=>{setEditDef({...item,type:tab});setEdn(item.name);setEdc(item.color);}}
-                  style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:20,background:"#fff",border:`1.5px solid ${rgba(item.color,0.45)}`,cursor:"grab",fontSize:12,fontWeight:600,color:"#1c1c1e",touchAction:"none",boxShadow:`0 1px 3px ${rgba(item.color,0.12)}`}}>
-                  <span style={{width:8,height:8,borderRadius:2,background:item.color,display:"inline-block"}}/>
-                  {item.name}
-                </div>
+                <SwipeChip key={item.id} item={item} tab={tab}
+                  onDragStart={startDrag}
+                  onEdit={()=>{setEditDef({...item,type:tab});setEdn(item.name);setEdc(item.color);}}
+                  onDelete={()=>delDef(tab,item.id)}/>
               ))}
               <button onClick={()=>isMood?setNewMoodModal(true):setNewActModal(true)}
-                style={{padding:"6px 10px",borderRadius:20,border:"1.5px dashed #ccc",background:"transparent",color:"#aaa",cursor:"pointer",fontSize:13,fontWeight:600}}>＋</button>
+                style={{padding:"6px 12px",borderRadius:20,border:"1.5px dashed #ccc",background:"transparent",color:"#aaa",cursor:"pointer",fontSize:13,fontWeight:600,flexShrink:0}}>＋</button>
             </div>
           </div>
 
@@ -387,36 +456,13 @@ function App(){
             const def=curDefs.find(d=>d.id===selectedBlock.defId)||{color:"#aaa",name:"?"};
             const type=isMood?"mood":"activity";
             return(
-              <div onClick={e=>e.stopPropagation()} style={{flexShrink:0,margin:"6px 12px 0",background:"#fff",borderRadius:14,padding:"10px 14px",boxShadow:"0 1px 6px rgba(0,0,0,0.08)",display:"flex",alignItems:"center",gap:10}}>
+              <div onClick={e=>e.stopPropagation()} style={{flexShrink:0,margin:"6px 12px 0",background:"#fff",borderRadius:14,padding:"10px 14px",boxShadow:"0 1px 6px rgba(0,0,0,0.08)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
                 <span style={{width:10,height:10,borderRadius:2,background:def.color,flexShrink:0,display:"inline-block"}}/>
-                <span style={{fontSize:13,fontWeight:700,color:def.color,flex:1}}>{def.name}</span>
-                {/* Start nudge */}
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                  <span style={{fontSize:9,color:"#aaa",fontWeight:600}}>START</span>
-                  <span style={{fontSize:11,fontWeight:700,color:"#1c1c1e"}}>{fmtTime(selectedBlock.sh,selectedBlock.sm)}</span>
-                  <div style={{display:"flex",gap:4}}>
-                    <button onClick={()=>nudgeStart(-STEP)} style={ND}>−</button>
-                    <button onClick={()=>nudgeStart(STEP)} style={ND}>＋</button>
-                  </div>
-                </div>
-                <span style={{color:"#ddd",fontSize:16}}>→</span>
-                {/* End nudge */}
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                  <span style={{fontSize:9,color:"#aaa",fontWeight:600}}>END</span>
-                  <span style={{fontSize:11,fontWeight:700,color:"#1c1c1e"}}>{fmtTime(selectedBlock.eh,selectedBlock.em)}</span>
-                  <div style={{display:"flex",gap:4}}>
-                    <button onClick={()=>nudgeEnd(-STEP)} style={ND}>−</button>
-                    <button onClick={()=>nudgeEnd(STEP)} style={ND}>＋</button>
-                  </div>
-                </div>
-                {/* Duration */}
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:32}}>
-                  <span style={{fontSize:9,color:"#aaa",fontWeight:600}}>DUR</span>
-                  <span style={{fontSize:11,fontWeight:700,color:def.color}}>{fmtDur(durMins(selectedBlock))}</span>
-                </div>
-                {/* Delete */}
+                <span style={{fontSize:13,fontWeight:700,color:def.color,flex:1}}>{def.name} <span style={{fontWeight:400,color:"#aaa",fontSize:11}}>{fmtDur(durMins(selectedBlock))}</span></span>
+                <button onClick={()=>nudgeStart(-STEP)} style={{...ND,fontSize:18}}>−</button>
+                <button onClick={()=>nudgeEnd(STEP)} style={{...ND,fontSize:18}}>＋</button>
                 <button onClick={()=>delBlock(type,selectedBlock.id)}
-                  style={{background:"#fff0f0",border:"none",borderRadius:8,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>
+                  style={{background:"#fff0f0",border:"none",borderRadius:8,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,flexShrink:0}}>
                   🗑️
                 </button>
               </div>
@@ -428,7 +474,6 @@ function App(){
         {tab==="stats"&&(
           <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
             <div style={{padding:"12px 16px 0",flexShrink:0}}>
-              <h1 style={{fontSize:18,fontWeight:800,color:"#1c1c1e",marginBottom:10}}>☀️ Mood Tracker</h1>
               <div style={{display:"flex",gap:6,marginBottom:4}}>
                 {[["week","Week"],["month","Month"]].map(([k,l])=>(
                   <button key={k} onClick={()=>setSv(k)}
