@@ -25,7 +25,7 @@ const HOUR_H=36;
 const TOTAL_H=24;
 const TL_H=HOUR_H*TOTAL_H;
 const HANDLE_H=24;
-const LONG_PRESS_MS=600;
+const LONG_PRESS_MS=800;
 
 const DEF_MOODS=[{name:"Happy",color:"#F6A623"},{name:"Calm",color:"#27AE60"},{name:"Anxious",color:"#E74C3C"},{name:"Focused",color:"#2980B9"},{name:"Tired",color:"#8E44AD"}];
 const DEF_ACTS=[{name:"Exercise",color:"#E67E22"},{name:"Meals",color:"#C0392B"},{name:"Work",color:"#1A5276"},{name:"Social",color:"#6C3483"},{name:"Sleep",color:"#1A8FA0"}];
@@ -225,9 +225,8 @@ function App(){
     lpTimer.current=setTimeout(()=>{
       if(!lpMoved.current){
         const t=e.touches[0];
-        setCtx({b,type,x:t.clientX,y:t.clientY});
-        // vibrate if supported
         if(navigator.vibrate) navigator.vibrate(40);
+        setEditBlk({b,type});
       }
     },LONG_PRESS_MS);
   }
@@ -569,4 +568,3 @@ ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
 </script>
 </body>
 </html>
-  
